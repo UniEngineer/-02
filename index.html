@@ -4,17 +4,21 @@
     <meta charset="utf-8">
     <title>3D Viewer</title>
     <style>
-        body { margin: 0; font-family: Arial, sans-serif; }
-        #container { text-align: center; padding: 20px; }
-        #viewer { width: 100%; height: 70vh; }
+        body { margin: 0; padding: 20px; font-family: Arial; text-align: center; }
+        #viewer { width: 100%; height: 70vh; margin: 0 auto; }
+        button { padding: 10px 20px; margin: 10px; }
     </style>
 </head>
 <body>
-    <div id="container">
-        <h1>ВИЗГЛТ-25Н</h1>
-        <p id="status">Загрузка...</p>
-        <div id="viewer"></div>
+    <h1>3D Просмотрщик</h1>
+    
+    <div id="telegram-check">
+        <p>Проверка платформы...</p>
     </div>
+    
+    <div id="viewer"></div>
+    <input type="file" id="file-input" accept=".glb,.gltf" style="display: none;">
+    <button id="upload-btn">Загрузить модель</button>
 
     <!-- Three.js -->
     <script src="https://cdn.jsdelivr.net/npm/three@0.132.2/build/three.min.js"></script>
@@ -22,43 +26,57 @@
     
     <script>
         // Проверяем, открыто ли в Telegram WebApp
-        if (window.Telegram && Telegram.WebApp) {
-            const tgWebApp = Telegram.WebApp;
-            tgWebApp.expand(); // Раскрываем на весь экран
-            
-            // Показываем данные от бота (если есть)
-            const initData = tgWebApp.initData || {};
-            document.getElementById('status').textContent = "Готов к работе!";
-
-            // Здесь можно обработать данные от бота
-            if (initData.model) {
-                loadModel(initData.model);
-            } else {
-                document.getElementById('status').textContent = "Отправьте модель через бота!";
+        const isTelegram = () => {
+            try {
+                return window.Telegram && Telegram.WebApp;
+            } catch (e) {
+                return false;
             }
+        };
+
+        // Инициализация
+        if (isTelegram()) {
+            document.getElementById('telegram-check').innerHTML = 
+                '<p>Добро пожаловать в Telegram WebApp!</p>';
+            Telegram.WebApp.expand();
         } else {
-            document.getElementById('status').textContent = "Откройте через Telegram-бота!";
+            document.getElementById('telegram-check').innerHTML = 
+                '<p style="color:red">Откройте через Telegram-бота для полного функционала</p>';
         }
 
-        function loadModel(url) {
-            const scene = new THREE.Scene();
-            const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-            const renderer = new THREE.WebGLRenderer();
-            renderer.setSize(window.innerWidth, window.innerHeight);
-            document.getElementById('viewer').appendChild(renderer.domElement);
+        // Общий функционал 3D-просмотра
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({antialias: true});
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.getElementById('viewer').appendChild(renderer.domElement);
 
-            const loader = new THREE.GLTFLoader();
-            loader.load(url, (gltf) => {
-                scene.add(gltf.scene);
-                camera.position.z = 5;
-                animate();
-            });
+        // Загрузка файлов
+        document.getElementById('upload-btn').addEventListener('click', () => {
+            document.getElementById('file-input').click();
+        });
 
-            function animate() {
-                requestAnimationFrame(animate);
-                renderer.render(scene, camera);
-            }
+        document.getElementById('file-input').addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                const loader = new THREE.GLTFLoader();
+                loader.load(event.target.result, (gltf) => {
+                    scene.add(gltf.scene);
+                    camera.position.z = 5;
+                });
+            };
+            reader.readAsDataURL(file);
+        });
+
+        // Анимация
+        function animate() {
+            requestAnimationFrame(animate);
+            renderer.render(scene, camera);
         }
+        animate();
     </script>
 </body>
 </html>
