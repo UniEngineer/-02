@@ -2,141 +2,159 @@
 <html>
 <head>
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-    <title>Мобильный 3D-вьюер</title>
+    <title>3D Viewer (Адаптивный)</title>
     <style>
-        body { margin: 0; overflow: hidden; touch-action: none; }
-        #viewer { width: 100vw; height: 100vh; }
-        #loading { 
-            position: absolute; 
-            top: 10px; 
-            left: 10px; 
+        body { margin: 0; font-family: Arial; }
+        #device-selector {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            z-index: 100;
+            background: rgba(0,0,0,0.7);
+            padding: 10px;
+            border-radius: 5px;
             color: white;
-            background: rgba(0,0,0,0.5);
-            padding: 5px 10px;
         }
+        button {
+            padding: 8px 12px;
+            margin: 5px;
+            background: #0088cc;
+            color: white;
+            border: none;
+            border-radius: 3px;
+        }
+        #viewer { width: 100vw; height: 100vh; }
     </style>
 </head>
 <body>
-    <div id="loading">Загрузка...</div>
+    <div id="device-selector">
+        <p>Выберите устройство:</p>
+        <button id="btn-pc">ПК версия</button>
+        <button id="btn-mobile">Мобильная версия</button>
+    </div>
     <div id="viewer"></div>
 
-    <!-- Three.js с оптимизированными импортами -->
+    <!-- Three.js -->
     <script src="https://cdn.jsdelivr.net/npm/three@0.132.2/build/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.132.2/examples/js/loaders/GLTFLoader.js"></script>
-    
+
     <script>
-        // 1. Настройка рендерера для мобильных
-        const renderer = new THREE.WebGLRenderer({
-            antialias: true,
-            powerPreference: "low-power",
-            precision: "mediump" // Уменьшаем точность вычислений
-        });
-        renderer.setPixelRatio(window.devicePixelRatio * 0.75); // Снижаем нагрузку
-        renderer.setSize(window.innerWidth, window.innerHeight);
-        renderer.outputEncoding = THREE.sRGBEncoding;
-        document.getElementById('viewer').appendChild(renderer.domElement);
-
-        // 2. Упрощенная сцена
-        const scene = new THREE.Scene();
-        scene.background = new THREE.Color(0x222222);
+        // 1. Определение устройства по умолчанию
+        const isMobile = /Android|iPhone|iPad/i.test(navigator.userAgent);
+        let currentMode = isMobile ? 'mobile' : 'pc';
         
-        // 3. Оптимизированное освещение
-        const light = new THREE.AmbientLight(0xffffff, 0.8);
-        scene.add(light);
+        // 2. Элементы управления
+        document.getElementById('btn-pc').addEventListener('click', () => {
+            currentMode = 'pc';
+            initViewer();
+        });
+        
+        document.getElementById('btn-mobile').addEventListener('click', () => {
+            currentMode = 'mobile';
+            initViewer();
+        });
 
-        // 4. Камера с ограничениями для мобильных
-        const camera = new THREE.PerspectiveCamera(
-            60, // Уменьшаем угол обзора
-            window.innerWidth / window.innerHeight,
-            0.1,
-            100
-        );
-        camera.position.z = 5;
-
-        // 5. Загрузка модели с автоматической оптимизацией
-        const loader = new THREE.GLTFLoader();
-        loader.load(
-            'model.glb', // Укажите путь к вашей модели
-            (gltf) => {
-                // Автоматическая оптимизация
-                gltf.scene.traverse((child) => {
-                    if (child.isMesh) {
-                        // Упрощаем материалы
-                        child.material.roughness = 0.7;
-                        child.material.metalness = 0.1;
-                        
-                        // Фикс цветов
-                        if (child.material.map) {
-                            child.material.map.anisotropy = 1; // Уменьшаем качество текстур
-                        }
-                    }
-                });
-                
-                scene.add(gltf.scene);
-                document.getElementById('loading').remove();
-            },
-            (xhr) => {
-                // Прогресс загрузки
-                const percent = (xhr.loaded / xhr.total) * 100;
-                document.getElementById('loading').textContent = `Загрузка: ${Math.round(percent)}%`;
-            },
-            (error) => {
-                console.error("Ошибка:", error);
-                document.getElementById('loading').textContent = "Ошибка загрузки";
+        // 3. Инициализация вьюера
+        function initViewer() {
+            // Очищаем предыдущую сцену
+            const viewer = document.getElementById('viewer');
+            viewer.innerHTML = '';
+            document.getElementById('device-selector').style.display = 'none';
+            
+            if (currentMode === 'pc') {
+                initPCViewer();
+            } else {
+                initMobileViewer();
             }
-        );
-
-        // 6. Управление для мобильных
-        let touchStart = { x: 0, y: 0 };
-        let rotation = { x: 0, y: 0 };
-        
-        renderer.domElement.addEventListener('touchstart', (e) => {
-            touchStart.x = e.touches[0].clientX;
-            touchStart.y = e.touches[0].clientY;
-        }, { passive: true });
-        
-        renderer.domElement.addEventListener('touchmove', (e) => {
-            if (!touchStart.x) return;
-            
-            const deltaX = e.touches[0].clientX - touchStart.x;
-            const deltaY = e.touches[0].clientY - touchStart.y;
-            
-            rotation.x += deltaY * 0.01;
-            rotation.y += deltaX * 0.01;
-            
-            // Ограничиваем вращение
-            rotation.x = Math.max(-Math.PI/4, Math.min(Math.PI/4, rotation.x));
-            
-            touchStart.x = e.touches[0].clientX;
-            touchStart.y = e.touches[0].clientY;
-        }, { passive: true });
-
-        // 7. Анимация с контролем FPS
-        let lastTime = 0;
-        const targetFPS = 30;
-        
-        function animate(time) {
-            requestAnimationFrame(animate);
-            
-            // Ограничиваем FPS
-            if (time - lastTime < 1000 / targetFPS) return;
-            lastTime = time;
-            
-            // Плавное вращение
-            scene.rotation.y += (rotation.y - scene.rotation.y) * 0.1;
-            scene.rotation.x += (rotation.x - scene.rotation.x) * 0.1;
-            
-            renderer.render(scene, camera);
         }
-        animate(0);
 
-        // 8. Адаптация к изменению размера
-        window.addEventListener('resize', () => {
-            camera.aspect = window.innerWidth / window.innerHeight;
-            camera.updateProjectionMatrix();
+        // 4. Версия для ПК (полнофункциональная)
+        function initPCViewer() {
+            const scene = new THREE.Scene();
+            const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+            const renderer = new THREE.WebGLRenderer({ antialias: true });
             renderer.setSize(window.innerWidth, window.innerHeight);
-        });
+            document.getElementById('viewer').appendChild(renderer.domElement);
+
+            // Освещение
+            const light = new THREE.AmbientLight(0xffffff, 0.5);
+            scene.add(light);
+            
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            directionalLight.position.set(1, 1, 1);
+            scene.add(directionalLight);
+
+            // Загрузка модели
+            const loader = new THREE.GLTFLoader();
+            loader.load(
+                'model.glb',
+                (gltf) => {
+                    scene.add(gltf.scene);
+                    camera.position.z = 5;
+                    
+                    // Анимация
+                    function animate() {
+                        requestAnimationFrame(animate);
+                        renderer.render(scene, camera);
+                    }
+                    animate();
+                }
+            );
+        }
+
+        // 5. Ультра-легкая мобильная версия
+        function initMobileViewer() {
+            const scene = new THREE.Scene();
+            const camera = new THREE.PerspectiveCamera(60, window.innerWidth/window.innerHeight, 0.1, 100);
+            const renderer = new THREE.WebGLRenderer({
+                antialias: false,
+                powerPreference: "low-power"
+            });
+            renderer.setPixelRatio(1); // Фиксированное значение для мобильных
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            document.getElementById('viewer').appendChild(renderer.domElement);
+
+            // Минимальное освещение
+            const light = new THREE.AmbientLight(0xffffff, 0.8);
+            scene.add(light);
+
+            // Упрощенная загрузка
+            const loader = new THREE.GLTFLoader();
+            loader.load(
+                'model.glb',
+                (gltf) => {
+                    // Упрощаем материалы
+                    gltf.scene.traverse(child => {
+                        if (child.isMesh) {
+                            child.material.roughness = 0.9;
+                            if (child.material.map) {
+                                child.material.map.anisotropy = 1;
+                            }
+                        }
+                    });
+                    
+                    scene.add(gltf.scene);
+                    camera.position.z = 5;
+
+                    // Ограниченная анимация (30 FPS)
+                    let lastTime = 0;
+                    function animate(time) {
+                        requestAnimationFrame(animate);
+                        if (time - lastTime < 33) return; // 30 FPS
+                        lastTime = time;
+                        renderer.render(scene, camera);
+                    }
+                    animate(0);
+                }
+            );
+        }
+
+        // Показываем выбор устройства при загрузке
+        if (!isMobile) {
+            document.getElementById('device-selector').style.display = 'block';
+        } else {
+            initViewer(); // Автовыбор мобильной версии
+        }
     </script>
 </body>
 </html>
