@@ -2,95 +2,177 @@
 <html>
 <head>
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>3D Viewer PRO</title>
     <style>
-        body { margin: 0; overflow: hidden; }
-        #container { position: relative; width: 100vw; height: 100vh; }
+        body { 
+            margin: 0;
+            padding: 0;
+            font-family: Arial;
+            overflow: hidden;
+            touch-action: none;
+        }
+        #container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+        }
         #upload-btn {
-            position: absolute; top: 10px; left: 10px;
-            z-index: 100; padding: 8px 15px;
-            background: #0088cc; color: white; border: none; border-radius: 4px;
+            position: absolute;
+            top: 15px;
+            left: 15px;
+            z-index: 100;
+            padding: 10px 15px;
+            background: #0088cc;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            font-size: 14px;
+        }
+        #status {
+            position: absolute;
+            top: 15px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 100;
+            background: rgba(0,0,0,0.7);
+            color: white;
+            padding: 5px 10px;
+            border-radius: 5px;
+            font-size: 12px;
         }
     </style>
 </head>
 <body>
     <div id="container">
-        <button id="upload-btn">Загрузить GLB</button>
+        <button id="upload-btn">Загрузить модель</button>
+        <div id="status">Готов к работе</div>
         <div id="viewer"></div>
     </div>
 
-    <!-- Three.js + оптимизированные импорты -->
+    <!-- Three.js с оптимизированными импортами -->
     <script src="https://cdn.jsdelivr.net/npm/three@0.132.2/build/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.132.2/examples/js/loaders/GLTFLoader.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.132.2/examples/js/controls/OrbitControls.js"></script>
 
     <script>
-        // Инициализация (совмещённая версия)
+        // Инициализация сцены с цветокоррекцией
         const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x050505);
+        
         const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
-        const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+        camera.position.z = 5;
+        
+        const renderer = new THREE.WebGLRenderer({ 
+            antialias: true,
+            powerPreference: /Mobile/i.test(navigator.userAgent) ? "low-power" : "high-performance"
+        });
+        renderer.outputEncoding = THREE.sRGBEncoding; // Фикс цветов
         renderer.setSize(window.innerWidth, window.innerHeight);
-        renderer.outputEncoding = THREE.sRGBEncoding; // Автокоррекция цветов
         document.getElementById('viewer').appendChild(renderer.domElement);
 
-        // Освещение (новый оптимизированный вариант)
-        scene.add(new THREE.AmbientLight(0xffffff, 0.5));
-        const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
-        dirLight.position.set(1, 1, 1);
-        scene.add(dirLight);
+        // Оптимизированное освещение для цветных материалов
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+        scene.add(ambientLight);
+        
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        directionalLight.position.set(1, 1, 1);
+        scene.add(directionalLight);
 
-        // Управление камерой (из старой версии)
+        // Управление камерой
         const controls = new THREE.OrbitControls(camera, renderer.domElement);
         controls.enableDamping = true;
         controls.dampingFactor = 0.05;
+        controls.screenSpacePanning = false;
 
-        // Загрузчик моделей (гибридный вариант)
+        // Загрузчик моделей с цветокоррекцией
         const loader = new THREE.GLTFLoader();
         document.getElementById('upload-btn').addEventListener('click', () => {
             const input = document.createElement('input');
             input.type = 'file';
             input.accept = '.glb,.gltf';
-            input.onchange = e => {
+            input.onchange = (e) => {
                 const file = e.target.files[0];
+                if (!file) return;
+                
+                document.getElementById('status').textContent = `Загрузка: ${file.name}...`;
                 const url = URL.createObjectURL(file);
                 
                 loader.load(url, (gltf) => {
-                    scene.clear();
-                    scene.add(gltf.scene);
+                    // Очистка сцены
+                    while(scene.children.length > 0) {
+                        scene.remove(scene.children[0]);
+                    }
+                    scene.add(ambientLight);
+                    scene.add(directionalLight);
                     
-                    // Автоцентрирование (новая функция)
+                    // Добавление модели с коррекцией цветов
+                    gltf.scene.traverse((child) => {
+                        if (child.isMesh) {
+                            // Автокоррекция материалов
+                            if (child.material) {
+                                child.material.color?.convertSRGBToLinear();
+                                child.material.needsUpdate = true;
+                            }
+                            
+                            // Оптимизация для мобильных
+                            if (/Mobile/i.test(navigator.userAgent)) {
+                                child.material.roughness = 0.7;
+                                child.material.metalness = 0.1;
+                            }
+                        }
+                    });
+                    
+                    scene.add(gltf.scene);
+                    document.getElementById('status').textContent = `Загружено: ${file.name}`;
+                    
+                    // Автоцентрирование
                     const box = new THREE.Box3().setFromObject(gltf.scene);
                     const center = box.getCenter(new THREE.Vector3());
-                    camera.position.copy(center).add(new THREE.Vector3(0, 0, 5));
-                    controls.target.copy(center);
+                    const size = box.getSize(new THREE.Vector3()).length();
                     
-                    // Оптимизация для мобильных (гибридный код)
-                    if (/Mobile/i.test(navigator.userAgent)) {
-                        renderer.setPixelRatio(1);
-                        gltf.scene.traverse(child => {
-                            if (child.isMesh) child.material.roughness = 0.8;
-                        });
-                    }
+                    camera.position.copy(center);
+                    camera.position.z += size * 1.5;
+                    controls.target.copy(center);
+                    controls.update();
+                    
+                }, undefined, (error) => {
+                    document.getElementById('status').textContent = `Ошибка: ${error.message}`;
                 });
             };
             input.click();
         });
 
-        // Анимация (оптимизированная версия)
+        // Анимация с оптимизацией FPS
         function animate() {
             requestAnimationFrame(animate);
+            
+            // Снижение нагрузки на мобильных
+            if (/Mobile/i.test(navigator.userAgent)) {
+                renderer.setPixelRatio(window.devicePixelRatio * 0.75);
+            }
+            
             controls.update();
             renderer.render(scene, camera);
         }
         animate();
 
-        // Telegram WebApp интеграция (из старого кода)
+        // Интеграция с Telegram WebApp
         if (window.Telegram?.WebApp) {
             Telegram.WebApp.expand();
             document.getElementById('upload-btn').style.display = 'none';
+            document.getElementById('status').textContent = "Используйте бота для загрузки";
+            
             // Здесь можно добавить получение модели из Telegram
+            // Например: const modelUrl = Telegram.WebApp.initDataUnsafe.model;
         }
+
+        // Адаптация под ресайз
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
     </script>
 </body>
 </html>
