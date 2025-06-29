@@ -2,108 +2,85 @@
 <html>
 <head>
     <meta charset="utf-8">
-    <title>3D Viewer</title>
+    <title>3D Viewer (Антикризисный)</title>
     <style>
         body { margin: 0; overflow: hidden; }
-        #viewer { width: 100vw; height: 100vh; }
-        #mode-info {
-            position: absolute; 
-            top: 10px; 
-            left: 10px; 
-            background: rgba(0,0,0,0.7); 
-            color: white; 
-            padding: 5px 10px;
-            border-radius: 5px;
+        #status {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: rgba(0,0,0,0.7);
+            color: white;
+            padding: 10px;
             font-family: Arial;
+            z-index: 100;
         }
+        #viewer { width: 100vw; height: 100vh; }
     </style>
 </head>
 <body>
-    <div id="mode-info">Загрузка...</div>
+    <div id="status">Инициализация...</div>
     <div id="viewer"></div>
 
-    <!-- Three.js -->
+    <!-- Three.js из CDN с fallback -->
     <script src="https://cdn.jsdelivr.net/npm/three@0.132.2/build/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.132.2/examples/js/loaders/GLTFLoader.js"></script>
 
     <script>
-        // 1. Определяем устройство
-        const isMobile = /Android|iPhone|iPad/i.test(navigator.userAgent);
-        document.getElementById('mode-info').textContent = isMobile ? 'Мобильный режим' : 'ПК режим';
+        // 1. Проверка загрузки Three.js
+        if (!window.THREE || !THREE.GLTFLoader) {
+            document.getElementById('status').textContent = 'Ошибка: Three.js не загрузился';
+            throw new Error('Three.js не загружен');
+        }
 
-        // 2. Базовые настройки Three.js
-        const scene = new THREE.Scene();
-        const camera = new THREE.PerspectiveCamera(
-            isMobile ? 60 : 75, // Уменьшаем угол обзора для мобильных
-            window.innerWidth / window.innerHeight,
-            0.1,
-            isMobile ? 100 : 1000 // Ближняя плоскость отсечения
-        );
-        
-        const renderer = new THREE.WebGLRenderer({
-            antialias: !isMobile, // Антиалиасинг только для ПК
-            powerPreference: isMobile ? "low-power" : "high-performance"
-        });
-        
-        renderer.setSize(window.innerWidth, window.innerHeight);
-        document.getElementById('viewer').appendChild(renderer.domElement);
-
-        // 3. Освещение (одинаковое для обоих режимов)
-        const light1 = new THREE.AmbientLight(0xffffff, 0.5);
-        scene.add(light1);
-        
-        const light2 = new THREE.DirectionalLight(0xffffff, 0.8);
-        light2.position.set(1, 1, 1);
-        scene.add(light2);
-
-        // 4. Загрузка модели с разными настройками
-        const loader = new THREE.GLTFLoader();
-        loader.load(
-            'model.glb', // ЗАМЕНИТЕ НА ВАШ ФАЙЛ
-            (gltf) => {
-                // Общие настройки
-                scene.add(gltf.scene);
-                camera.position.z = 5;
-                
-                // Специфичные настройки
-                if (isMobile) {
-                    gltf.scene.traverse(child => {
-                        if (child.isMesh) {
-                            child.material.roughness = 0.9; // Уменьшаем блики
-                            if (child.material.map) {
-                                child.material.map.anisotropy = 1; // Ухудшаем текстуры
-                            }
-                        }
-                    });
-                }
-
-                // Запуск анимации
-                function animate() {
-                    requestAnimationFrame(animate);
-                    
-                    // Ограничение FPS для мобильных
-                    if (isMobile) {
-                        renderer.setPixelRatio(1); // Фиксированное значение
-                    }
-                    
-                    renderer.render(scene, camera);
-                }
-                animate();
-                
-                document.getElementById('mode-info').textContent += ' | Модель загружена';
-            },
-            undefined,
-            (error) => {
-                document.getElementById('mode-info').textContent = 'Ошибка: ' + error.message;
-            }
-        );
-
-        // 5. Адаптация к изменению размера
-        window.addEventListener('resize', () => {
-            camera.aspect = window.innerWidth / window.innerHeight;
-            camera.updateProjectionMatrix();
+        // 2. Инициализация
+        try {
+            const scene = new THREE.Scene();
+            const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            const renderer = new THREE.WebGLRenderer();
             renderer.setSize(window.innerWidth, window.innerHeight);
-        });
+            document.getElementById('viewer').appendChild(renderer.domElement);
+            
+            // Простое освещение
+            const light = new THREE.AmbientLight(0xffffff, 0.8);
+            scene.add(light);
+            
+            camera.position.z = 5;
+            document.getElementById('status').textContent = 'Загрузка модели...';
+
+            // 3. Загрузка модели с обработкой ошибок
+            const loader = new THREE.GLTFLoader();
+            
+            // Указываем ОБЯЗАТЕЛЬНЫЙ путь к модели
+            const modelUrl = 'https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/master/2.0/Duck/glTF/Duck.gltf';
+            
+            loader.load(
+                modelUrl,
+                (gltf) => {
+                    scene.add(gltf.scene);
+                    document.getElementById('status').textContent = 'Модель загружена!';
+                    
+                    function animate() {
+                        requestAnimationFrame(animate);
+                        renderer.render(scene, camera);
+                    }
+                    animate();
+                },
+                (xhr) => {
+                    // Прогресс загрузки
+                    const percent = (xhr.loaded / xhr.total) * 100;
+                    document.getElementById('status').textContent = `Загрузка: ${Math.round(percent)}%`;
+                },
+                (error) => {
+                    document.getElementById('status').textContent = `Ошибка: ${error.message}`;
+                    console.error(error);
+                }
+            );
+            
+        } catch (e) {
+            document.getElementById('status').textContent = `Ошибка инициализации: ${e.message}`;
+            console.error(e);
+        }
     </script>
 </body>
 </html>
