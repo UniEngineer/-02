@@ -1,86 +1,458 @@
 <!DOCTYPE html>
-<html>
+<html lang="ru">
 <head>
-    <meta charset="utf-8">
-    <title>3D Viewer (Антикризисный)</title>
-    <style>
-        body { margin: 0; overflow: hidden; }
-        #status {
-            position: absolute;
-            top: 10px;
-            left: 10px;
-            background: rgba(0,0,0,0.7);
-            color: white;
-            padding: 10px;
-            font-family: Arial;
-            z-index: 100;
-        }
-        #viewer { width: 100vw; height: 100vh; }
-    </style>
+  <meta charset="UTF-8" />
+  <title>Three.js GLB/GLTF Viewer</title>
+  <style>
+    html, body {
+      margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden;
+      font-family: Arial, sans-serif;
+      background-color: #111;
+      color: #eee;
+      user-select: none;
+      -webkit-user-select: none;
+      -moz-user-select: none;
+      -ms-user-select: none;
+    }
+    #container {
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 30px;
+      background-color: #222;
+      touch-action: none;
+    }
+    #statusBar {
+      position: fixed;
+      bottom: 0; left: 0; right: 0;
+      height: 30px;
+      background: #111;
+      border-top: 1px solid #444;
+      line-height: 30px;
+      padding: 0 10px;
+      font-size: 14px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      box-sizing: border-box;
+      user-select: none;
+    }
+    #fileInput {
+      display: none;
+    }
+    #loadButton, #resetCameraButton {
+      background-color: #333;
+      border: 1px solid #555;
+      color: #eee;
+      padding: 5px 10px;
+      margin-right: 10px;
+      cursor: pointer;
+      border-radius: 3px;
+      font-size: 14px;
+      user-select: none;
+      transition: background-color 0.2s ease;
+    }
+    #loadButton:hover, #resetCameraButton:hover {
+      background-color: #555;
+    }
+    #controls {
+      display: flex;
+      align-items: center;
+      min-width: 200px;
+    }
+  </style>
 </head>
 <body>
-    <div id="status">Инициализация...</div>
-    <div id="viewer"></div>
+  <div id="container"></div>
+  <div id="statusBar">
+    <div id="controls">
+      <button id="loadButton" title="Загрузить GLB/GLTF модель">Загрузить модель</button>
+      <button id="resetCameraButton" title="Сбросить камеру">Сброс камеры</button>
+      <input type="file" id="fileInput" accept=".glb,.gltf" />
+    </div>
+    <div id="statusText">Ожидание загрузки модели...</div>
+  </div>
 
-    <!-- Three.js из CDN с fallback -->
-    <script src="https://cdn.jsdelivr.net/npm/three@0.132.2/build/three.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/three@0.132.2/examples/js/loaders/GLTFLoader.js"></script>
+  <!-- Three.js -->
+  <script src="https://cdn.jsdelivr.net/npm/three@0.153.0/build/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.153.0/examples/js/loaders/GLTFLoader.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.153.0/examples/js/controls/OrbitControls.min.js"></script>
 
-    <script>
-        // 1. Проверка загрузки Three.js
-        if (!window.THREE || !THREE.GLTFLoader) {
-            document.getElementById('status').textContent = 'Ошибка: Three.js не загрузился';
-            throw new Error('Three.js не загружен');
+  <script>
+    (() => {
+      const container = document.getElementById('container');
+      const statusText = document.getElementById('statusText');
+      const loadButton = document.getElementById('loadButton');
+      const resetCameraButton = document.getElementById('resetCameraButton');
+      const fileInput = document.getElementById('fileInput');
+
+      let scene, camera, renderer, controls;
+      let model = null;
+      let clock = new THREE.Clock();
+
+      let isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+      let maxFPS = isMobile ? 30 : 60;
+
+      // Camera default params
+      const defaultCameraParams = {
+        position: new THREE.Vector3(0, 1.5, 3),
+        target: new THREE.Vector3(0, 0, 0),
+      };
+
+      // Touch control state
+      let touchState = {
+        lastTouches: [],
+        mode: null, // 'rotate' or 'zoom'
+        lastDistance: 0,
+        lastRotation: { x: 0, y: 0 },
+        rotation: { x: 0, y: 0 },
+      };
+
+      // Initialize scene and renderer
+      function init() {
+        scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x222222);
+
+        camera = new THREE.PerspectiveCamera(60, window.innerWidth / (window.innerHeight - 30), 0.1, 1000);
+        resetCamera();
+
+        renderer = new THREE.WebGLRenderer({ antialias: !isMobile, alpha: false });
+        renderer.setSize(window.innerWidth, window.innerHeight - 30);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        container.appendChild(renderer.domElement);
+
+        // Lights
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+        scene.add(ambientLight);
+
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        directionalLight.position.set(5, 10, 7);
+        directionalLight.castShadow = true;
+        scene.add(directionalLight);
+
+        if (!isMobile) {
+          controls = new THREE.OrbitControls(camera, renderer.domElement);
+          controls.target.copy(defaultCameraParams.target);
+          controls.enableDamping = true;
+          controls.dampingFactor = 0.05;
+          controls.minDistance = 0.5;
+          controls.maxDistance = 20;
+          controls.screenSpacePanning = false;
+        } else {
+          // For mobile: disable OrbitControls, use custom touch controls
+          controls = null;
+          enableTouchControls();
         }
 
-        // 2. Инициализация
-        try {
-            const scene = new THREE.Scene();
-            const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-            const renderer = new THREE.WebGLRenderer();
-            renderer.setSize(window.innerWidth, window.innerHeight);
-            document.getElementById('viewer').appendChild(renderer.domElement);
-            
-            // Простое освещение
-            const light = new THREE.AmbientLight(0xffffff, 0.8);
-            scene.add(light);
-            
-            camera.position.z = 5;
-            document.getElementById('status').textContent = 'Загрузка модели...';
+        window.addEventListener('resize', onWindowResize);
+        loadButton.addEventListener('click', () => fileInput.click());
+        fileInput.addEventListener('change', onFileSelected);
+        resetCameraButton.addEventListener('click', () => {
+          resetCamera();
+          updateStatus('Камера сброшена');
+        });
 
-            // 3. Загрузка модели с обработкой ошибок
-            const loader = new THREE.GLTFLoader();
-            
-            // Указываем ОБЯЗАТЕЛЬНЫЙ путь к модели
-            const modelUrl = 'https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/master/2.0/Duck/glTF/Duck.gltf';
-            
-            loader.load(
-                modelUrl,
-                (gltf) => {
-                    scene.add(gltf.scene);
-                    document.getElementById('status').textContent = 'Модель загружена!';
-                    
-                    function animate() {
-                        requestAnimationFrame(animate);
-                        renderer.render(scene, camera);
+        updateStatus(`Готово. Устройство: ${isMobile ? 'Мобильное' : 'ПК'}`);
+      }
+
+      // Reset camera to default position and target
+      function resetCamera() {
+        camera.position.copy(defaultCameraParams.position);
+        if (controls) {
+          controls.target.copy(defaultCameraParams.target);
+          controls.update();
+        }
+        else {
+          touchState.rotation.x = 0;
+          touchState.rotation.y = 0;
+          updateCameraFromTouchRotation();
+        }
+      }
+
+      // Handle window resize
+      function onWindowResize() {
+        camera.aspect = window.innerWidth / (window.innerHeight - 30);
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight - 30);
+      }
+
+      // Update status bar text
+      function updateStatus(text) {
+        statusText.textContent = text;
+      }
+
+      // Load model from file input
+      function onFileSelected(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+        if (!file.name.match(/\.(glb|gltf)$/i)) {
+          updateStatus('Ошибка: поддерживаются только файлы .glb и .gltf');
+          return;
+        }
+        updateStatus(`Загрузка модели: ${file.name}`);
+        const url = URL.createObjectURL(file);
+        loadModel(url, file.name, () => URL.revokeObjectURL(url));
+        // Clear input to allow loading same file again
+        fileInput.value = '';
+      }
+
+      // Load GLB/GLTF model
+      function loadModel(url, name = '', onComplete = null) {
+        const loader = new THREE.GLTFLoader();
+
+        loader.load(url, gltf => {
+          try {
+            if (model) {
+              scene.remove(model);
+              disposeModel(model);
+              model = null;
+            }
+            model = gltf.scene || gltf.scenes[0];
+            if (!model) throw new Error('Модель не содержит сцену');
+
+            // Optimize materials for mobile or keep PBR for PC
+            model.traverse(child => {
+              if (child.isMesh) {
+                if (isMobile) {
+                  // Simplify materials: roughness=0.8, disable envMap, etc.
+                  if (child.material) {
+                    const mat = child.material;
+                    // Ensure material is MeshStandardMaterial or compatible
+                    if (mat.isMeshStandardMaterial) {
+                      mat.roughness = 0.8;
+                      mat.metalness = 0.0;
+                      mat.envMap = null;
+                      mat.needsUpdate = true;
+                    } else if (Array.isArray(mat)) {
+                      mat.forEach(m => {
+                        if (m.isMeshStandardMaterial) {
+                          m.roughness = 0.8;
+                          m.metalness = 0.0;
+                          m.envMap = null;
+                          m.needsUpdate = true;
+                        }
+                      });
                     }
-                    animate();
-                },
-                (xhr) => {
-                    // Прогресс загрузки
-                    const percent = (xhr.loaded / xhr.total) * 100;
-                    document.getElementById('status').textContent = `Загрузка: ${Math.round(percent)}%`;
-                },
-                (error) => {
-                    document.getElementById('status').textContent = `Ошибка: ${error.message}`;
-                    console.error(error);
+                  }
+                } else {
+                  // For PC, keep original PBR materials as is
+                  // Just ensure textures are loaded properly
+                  // No action needed here
                 }
-            );
-            
-        } catch (e) {
-            document.getElementById('status').textContent = `Ошибка инициализации: ${e.message}`;
-            console.error(e);
+                child.castShadow = true;
+                child.receiveShadow = true;
+              }
+            });
+
+            scene.add(model);
+            centerCameraOnModel(model);
+
+            updateStatus(`Модель "${name}" загружена успешно`);
+          } catch (err) {
+            updateStatus(`Ошибка при обработке модели: ${err.message}`);
+          } finally {
+            if (onComplete) onComplete();
+          }
+        }, xhr => {
+          if (xhr.lengthComputable) {
+            const percent = ((xhr.loaded / xhr.total) * 100).toFixed(1);
+            updateStatus(`Загрузка модели "${name}": ${percent}%`);
+          }
+        }, error => {
+          updateStatus(`Ошибка загрузки модели: ${error.message || error}`);
+          if (onComplete) onComplete();
+        });
+      }
+
+      // Dispose model geometry and materials to free memory
+      function disposeModel(object) {
+        object.traverse(child => {
+          if (child.isMesh) {
+            if (child.geometry) {
+              child.geometry.dispose();
+            }
+            if (child.material) {
+              if (Array.isArray(child.material)) {
+                child.material.forEach(m => {
+                  disposeMaterial(m);
+                });
+              } else {
+                disposeMaterial(child.material);
+              }
+            }
+          }
+        });
+      }
+
+      function disposeMaterial(material) {
+        for (const key in material) {
+          if (!material.hasOwnProperty(key)) continue;
+          const value = material[key];
+          if (value && typeof value === 'object' && 'minFilter' in value) {
+            // probably a texture
+            value.dispose();
+          }
         }
-    </script>
+        material.dispose();
+      }
+
+      // Center camera and controls on loaded model
+      function centerCameraOnModel(object) {
+        // Compute bounding box
+        const box = new THREE.Box3().setFromObject(object);
+        if (box.isEmpty()) {
+          updateStatus('Внимание: модель пустая или не содержит геометрию');
+          return;
+        }
+        const size = box.getSize(new THREE.Vector3());
+        const center = box.getCenter(new THREE.Vector3());
+
+        // Position camera to fit the model
+        const maxDim = Math.max(size.x, size.y, size.z);
+        const fov = camera.fov * (Math.PI / 180);
+        let cameraZ = Math.abs(maxDim / 2 / Math.tan(fov / 2));
+        cameraZ *= 1.5; // some padding
+
+        // Update camera and controls target
+        if (controls) {
+          controls.target.copy(center);
+          controls.maxDistance = cameraZ * 10;
+          controls.minDistance = cameraZ / 10;
+          controls.update();
+          camera.position.set(center.x, center.y, center.z + cameraZ);
+        } else {
+          // Mobile: update touch rotation center
+          touchState.rotation.x = 0;
+          touchState.rotation.y = 0;
+          camera.position.set(center.x, center.y, center.z + cameraZ);
+          camera.lookAt(center);
+        }
+
+        // Save for reset
+        defaultCameraParams.position.copy(camera.position);
+        defaultCameraParams.target.copy(center);
+      }
+
+      // Animation loop with FPS limit
+      let lastFrameTime = 0;
+      function animate(time = 0) {
+        requestAnimationFrame(animate);
+        const delta = clock.getDelta();
+        const now = time;
+        const elapsed = now - lastFrameTime;
+        const interval = 1000 / maxFPS;
+
+        if (elapsed > interval) {
+          lastFrameTime = now - (elapsed % interval);
+
+          if (controls) {
+            controls.update();
+          }
+
+          if (isMobile && model) {
+            // update camera position from touch rotation
+            updateCameraFromTouchRotation();
+          }
+
+          renderer.render(scene, camera);
+        }
+      }
+
+      // --- Touch controls for mobile ---
+
+      function enableTouchControls() {
+        container.style.touchAction = 'none';
+        container.addEventListener('touchstart', onTouchStart, { passive: false });
+        container.addEventListener('touchmove', onTouchMove, { passive: false });
+        container.addEventListener('touchend', onTouchEnd, { passive: false });
+        container.addEventListener('touchcancel', onTouchEnd, { passive: false });
+      }
+
+      function onTouchStart(event) {
+        if (event.touches.length === 1) {
+          touchState.mode = 'rotate';
+          touchState.lastTouches = [event.touches[0].pageX, event.touches[0].pageY];
+        } else if (event.touches.length === 2) {
+          touchState.mode = 'zoom';
+          const dx = event.touches[0].pageX - event.touches[1].pageX;
+          const dy = event.touches[0].pageY - event.touches[1].pageY;
+          touchState.lastDistance = Math.sqrt(dx * dx + dy * dy);
+        } else {
+          touchState.mode = null;
+        }
+      }
+
+      function onTouchMove(event) {
+        event.preventDefault();
+        if (!model) return;
+        if (touchState.mode === 'rotate' && event.touches.length === 1) {
+          const x = event.touches[0].pageX;
+          const y = event.touches[0].pageY;
+          const dx = x - touchState.lastTouches[0];
+          const dy = y - touchState.lastTouches[1];
+          touchState.lastTouches = [x, y];
+
+          // Sensitivity tuning
+          const sensitivity = 0.005;
+          touchState.rotation.y -= dx * sensitivity;
+          touchState.rotation.x -= dy * sensitivity;
+          touchState.rotation.x = Math.min(Math.max(touchState.rotation.x, -Math.PI / 2), Math.PI / 2);
+        } else if (touchState.mode === 'zoom' && event.touches.length === 2) {
+          const dx = event.touches[0].pageX - event.touches[1].pageX;
+          const dy = event.touches[0].pageY - event.touches[1].pageY;
+          const distance = Math.sqrt(dx * dx + dy * dy);
+          const delta = distance - touchState.lastDistance;
+          touchState.lastDistance = distance;
+
+          // Zoom sensitivity
+          const zoomSensitivity = 0.01;
+          camera.position.addScaledVector(camera.getWorldDirection(new THREE.Vector3()), -delta * zoomSensitivity);
+
+          // Clamp zoom distance from target
+          const dir = new THREE.Vector3();
+          dir.subVectors(camera.position, defaultCameraParams.target);
+          const dist = dir.length();
+          const minDist = 0.5;
+          const maxDist = 50;
+          if (dist < minDist) {
+            dir.setLength(minDist);
+            camera.position.copy(defaultCameraParams.target).add(dir);
+          } else if (dist > maxDist) {
+            dir.setLength(maxDist);
+            camera.position.copy(defaultCameraParams.target).add(dir);
+          }
+        }
+      }
+
+      function onTouchEnd(event) {
+        if (event.touches.length === 0) {
+          touchState.mode = null;
+        } else if (event.touches.length === 1) {
+          touchState.mode = 'rotate';
+          touchState.lastTouches = [event.touches[0].pageX, event.touches[0].pageY];
+        }
+      }
+
+      function updateCameraFromTouchRotation() {
+        if (!model) return;
+        const radiusVec = new THREE.Vector3();
+        radiusVec.subVectors(camera.position, defaultCameraParams.target);
+        const radius = radiusVec.length();
+
+        const x = radius * Math.cos(touchState.rotation.x) * Math.sin(touchState.rotation.y);
+        const y = radius * Math.sin(touchState.rotation.x);
+        const z = radius * Math.cos(touchState.rotation.x) * Math.cos(touchState.rotation.y);
+
+        camera.position.set(
+          defaultCameraParams.target.x + x,
+          defaultCameraParams.target.y + y,
+          defaultCameraParams.target.z + z
+        );
+        camera.lookAt(defaultCameraParams.target);
+      }
+
+      // --- Start ---
+      init();
+      animate();
+    })();
+  </script>
 </body>
 </html>
