@@ -2,36 +2,24 @@
 <html>
 <head>
     <meta charset="utf-8">
-    <title>3D Viewer (Адаптивный)</title>
+    <title>3D Viewer</title>
     <style>
-        body { margin: 0; font-family: Arial; }
-        #device-selector {
-            position: absolute;
-            top: 10px;
-            left: 10px;
-            z-index: 100;
-            background: rgba(0,0,0,0.7);
-            padding: 10px;
-            border-radius: 5px;
-            color: white;
-        }
-        button {
-            padding: 8px 12px;
-            margin: 5px;
-            background: #0088cc;
-            color: white;
-            border: none;
-            border-radius: 3px;
-        }
+        body { margin: 0; overflow: hidden; }
         #viewer { width: 100vw; height: 100vh; }
+        #mode-info {
+            position: absolute; 
+            top: 10px; 
+            left: 10px; 
+            background: rgba(0,0,0,0.7); 
+            color: white; 
+            padding: 5px 10px;
+            border-radius: 5px;
+            font-family: Arial;
+        }
     </style>
 </head>
 <body>
-    <div id="device-selector">
-        <p>Выберите устройство:</p>
-        <button id="btn-pc">ПК версия</button>
-        <button id="btn-mobile">Мобильная версия</button>
-    </div>
+    <div id="mode-info">Загрузка...</div>
     <div id="viewer"></div>
 
     <!-- Three.js -->
@@ -39,122 +27,83 @@
     <script src="https://cdn.jsdelivr.net/npm/three@0.132.2/examples/js/loaders/GLTFLoader.js"></script>
 
     <script>
-        // 1. Определение устройства по умолчанию
+        // 1. Определяем устройство
         const isMobile = /Android|iPhone|iPad/i.test(navigator.userAgent);
-        let currentMode = isMobile ? 'mobile' : 'pc';
+        document.getElementById('mode-info').textContent = isMobile ? 'Мобильный режим' : 'ПК режим';
+
+        // 2. Базовые настройки Three.js
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(
+            isMobile ? 60 : 75, // Уменьшаем угол обзора для мобильных
+            window.innerWidth / window.innerHeight,
+            0.1,
+            isMobile ? 100 : 1000 // Ближняя плоскость отсечения
+        );
         
-        // 2. Элементы управления
-        document.getElementById('btn-pc').addEventListener('click', () => {
-            currentMode = 'pc';
-            initViewer();
+        const renderer = new THREE.WebGLRenderer({
+            antialias: !isMobile, // Антиалиасинг только для ПК
+            powerPreference: isMobile ? "low-power" : "high-performance"
         });
         
-        document.getElementById('btn-mobile').addEventListener('click', () => {
-            currentMode = 'mobile';
-            initViewer();
-        });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.getElementById('viewer').appendChild(renderer.domElement);
 
-        // 3. Инициализация вьюера
-        function initViewer() {
-            // Очищаем предыдущую сцену
-            const viewer = document.getElementById('viewer');
-            viewer.innerHTML = '';
-            document.getElementById('device-selector').style.display = 'none';
-            
-            if (currentMode === 'pc') {
-                initPCViewer();
-            } else {
-                initMobileViewer();
-            }
-        }
+        // 3. Освещение (одинаковое для обоих режимов)
+        const light1 = new THREE.AmbientLight(0xffffff, 0.5);
+        scene.add(light1);
+        
+        const light2 = new THREE.DirectionalLight(0xffffff, 0.8);
+        light2.position.set(1, 1, 1);
+        scene.add(light2);
 
-        // 4. Версия для ПК (полнофункциональная)
-        function initPCViewer() {
-            const scene = new THREE.Scene();
-            const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
-            const renderer = new THREE.WebGLRenderer({ antialias: true });
-            renderer.setSize(window.innerWidth, window.innerHeight);
-            document.getElementById('viewer').appendChild(renderer.domElement);
-
-            // Освещение
-            const light = new THREE.AmbientLight(0xffffff, 0.5);
-            scene.add(light);
-            
-            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
-            directionalLight.position.set(1, 1, 1);
-            scene.add(directionalLight);
-
-            // Загрузка модели
-            const loader = new THREE.GLTFLoader();
-            loader.load(
-                'model.glb',
-                (gltf) => {
-                    scene.add(gltf.scene);
-                    camera.position.z = 5;
-                    
-                    // Анимация
-                    function animate() {
-                        requestAnimationFrame(animate);
-                        renderer.render(scene, camera);
-                    }
-                    animate();
-                }
-            );
-        }
-
-        // 5. Ультра-легкая мобильная версия
-        function initMobileViewer() {
-            const scene = new THREE.Scene();
-            const camera = new THREE.PerspectiveCamera(60, window.innerWidth/window.innerHeight, 0.1, 100);
-            const renderer = new THREE.WebGLRenderer({
-                antialias: false,
-                powerPreference: "low-power"
-            });
-            renderer.setPixelRatio(1); // Фиксированное значение для мобильных
-            renderer.setSize(window.innerWidth, window.innerHeight);
-            document.getElementById('viewer').appendChild(renderer.domElement);
-
-            // Минимальное освещение
-            const light = new THREE.AmbientLight(0xffffff, 0.8);
-            scene.add(light);
-
-            // Упрощенная загрузка
-            const loader = new THREE.GLTFLoader();
-            loader.load(
-                'model.glb',
-                (gltf) => {
-                    // Упрощаем материалы
+        // 4. Загрузка модели с разными настройками
+        const loader = new THREE.GLTFLoader();
+        loader.load(
+            'model.glb', // ЗАМЕНИТЕ НА ВАШ ФАЙЛ
+            (gltf) => {
+                // Общие настройки
+                scene.add(gltf.scene);
+                camera.position.z = 5;
+                
+                // Специфичные настройки
+                if (isMobile) {
                     gltf.scene.traverse(child => {
                         if (child.isMesh) {
-                            child.material.roughness = 0.9;
+                            child.material.roughness = 0.9; // Уменьшаем блики
                             if (child.material.map) {
-                                child.material.map.anisotropy = 1;
+                                child.material.map.anisotropy = 1; // Ухудшаем текстуры
                             }
                         }
                     });
-                    
-                    scene.add(gltf.scene);
-                    camera.position.z = 5;
-
-                    // Ограниченная анимация (30 FPS)
-                    let lastTime = 0;
-                    function animate(time) {
-                        requestAnimationFrame(animate);
-                        if (time - lastTime < 33) return; // 30 FPS
-                        lastTime = time;
-                        renderer.render(scene, camera);
-                    }
-                    animate(0);
                 }
-            );
-        }
 
-        // Показываем выбор устройства при загрузке
-        if (!isMobile) {
-            document.getElementById('device-selector').style.display = 'block';
-        } else {
-            initViewer(); // Автовыбор мобильной версии
-        }
+                // Запуск анимации
+                function animate() {
+                    requestAnimationFrame(animate);
+                    
+                    // Ограничение FPS для мобильных
+                    if (isMobile) {
+                        renderer.setPixelRatio(1); // Фиксированное значение
+                    }
+                    
+                    renderer.render(scene, camera);
+                }
+                animate();
+                
+                document.getElementById('mode-info').textContent += ' | Модель загружена';
+            },
+            undefined,
+            (error) => {
+                document.getElementById('mode-info').textContent = 'Ошибка: ' + error.message;
+            }
+        );
+
+        // 5. Адаптация к изменению размера
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
     </script>
 </body>
 </html>
