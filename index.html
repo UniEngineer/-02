@@ -2,62 +2,141 @@
 <html>
 <head>
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>3D Viewer ULTRA</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+    <title>Мобильный 3D-вьюер</title>
     <style>
         body { margin: 0; overflow: hidden; touch-action: none; }
-        #viewer { width: 100%; height: 100%; }
-        #loading { position: absolute; top: 10px; left: 10px; color: white; }
+        #viewer { width: 100vw; height: 100vh; }
+        #loading { 
+            position: absolute; 
+            top: 10px; 
+            left: 10px; 
+            color: white;
+            background: rgba(0,0,0,0.5);
+            padding: 5px 10px;
+        }
     </style>
 </head>
 <body>
     <div id="loading">Загрузка...</div>
     <div id="viewer"></div>
 
+    <!-- Three.js с оптимизированными импортами -->
     <script src="https://cdn.jsdelivr.net/npm/three@0.132.2/build/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.132.2/examples/js/loaders/GLTFLoader.js"></script>
     
     <script>
-        // Инициализация
-        const scene = new THREE.Scene();
-        const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
-        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        // 1. Настройка рендерера для мобильных
+        const renderer = new THREE.WebGLRenderer({
+            antialias: true,
+            powerPreference: "low-power",
+            precision: "mediump" // Уменьшаем точность вычислений
+        });
+        renderer.setPixelRatio(window.devicePixelRatio * 0.75); // Снижаем нагрузку
         renderer.setSize(window.innerWidth, window.innerHeight);
         renderer.outputEncoding = THREE.sRGBEncoding;
         document.getElementById('viewer').appendChild(renderer.domElement);
 
-        // Освещение
-        scene.add(new THREE.AmbientLight(0xffffff, 0.5));
-        const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
-        dirLight.position.set(1, 1, 1);
-        scene.add(dirLight);
+        // 2. Упрощенная сцена
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x222222);
+        
+        // 3. Оптимизированное освещение
+        const light = new THREE.AmbientLight(0xffffff, 0.8);
+        scene.add(light);
 
-        // Загрузка модели
+        // 4. Камера с ограничениями для мобильных
+        const camera = new THREE.PerspectiveCamera(
+            60, // Уменьшаем угол обзора
+            window.innerWidth / window.innerHeight,
+            0.1,
+            100
+        );
+        camera.position.z = 5;
+
+        // 5. Загрузка модели с автоматической оптимизацией
         const loader = new THREE.GLTFLoader();
         loader.load(
-            'URL_ВАШЕЙ_МОДЕЛИ.glb',
+            'model.glb', // Укажите путь к вашей модели
             (gltf) => {
-                gltf.scene.traverse(child => {
+                // Автоматическая оптимизация
+                gltf.scene.traverse((child) => {
                     if (child.isMesh) {
-                        child.material.color?.convertSRGBToLinear();
+                        // Упрощаем материалы
+                        child.material.roughness = 0.7;
+                        child.material.metalness = 0.1;
+                        
+                        // Фикс цветов
+                        if (child.material.map) {
+                            child.material.map.anisotropy = 1; // Уменьшаем качество текстур
+                        }
                     }
                 });
+                
                 scene.add(gltf.scene);
                 document.getElementById('loading').remove();
+            },
+            (xhr) => {
+                // Прогресс загрузки
+                const percent = (xhr.loaded / xhr.total) * 100;
+                document.getElementById('loading').textContent = `Загрузка: ${Math.round(percent)}%`;
+            },
+            (error) => {
+                console.error("Ошибка:", error);
+                document.getElementById('loading').textContent = "Ошибка загрузки";
             }
         );
 
-        // Мобильные фиксы
-        let lastRender = 0;
+        // 6. Управление для мобильных
+        let touchStart = { x: 0, y: 0 };
+        let rotation = { x: 0, y: 0 };
+        
+        renderer.domElement.addEventListener('touchstart', (e) => {
+            touchStart.x = e.touches[0].clientX;
+            touchStart.y = e.touches[0].clientY;
+        }, { passive: true });
+        
+        renderer.domElement.addEventListener('touchmove', (e) => {
+            if (!touchStart.x) return;
+            
+            const deltaX = e.touches[0].clientX - touchStart.x;
+            const deltaY = e.touches[0].clientY - touchStart.y;
+            
+            rotation.x += deltaY * 0.01;
+            rotation.y += deltaX * 0.01;
+            
+            // Ограничиваем вращение
+            rotation.x = Math.max(-Math.PI/4, Math.min(Math.PI/4, rotation.x));
+            
+            touchStart.x = e.touches[0].clientX;
+            touchStart.y = e.touches[0].clientY;
+        }, { passive: true });
+
+        // 7. Анимация с контролем FPS
+        let lastTime = 0;
+        const targetFPS = 30;
+        
         function animate(time) {
             requestAnimationFrame(animate);
-            if (/Mobile/i.test(navigator.userAgent) {
-                if (time - lastRender < 33) return; // 30 FPS
-                lastRender = time;
-            }
+            
+            // Ограничиваем FPS
+            if (time - lastTime < 1000 / targetFPS) return;
+            lastTime = time;
+            
+            // Плавное вращение
+            scene.rotation.y += (rotation.y - scene.rotation.y) * 0.1;
+            scene.rotation.x += (rotation.x - scene.rotation.x) * 0.1;
+            
             renderer.render(scene, camera);
         }
         animate(0);
+
+        // 8. Адаптация к изменению размера
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
     </script>
 </body>
 </html>
